@@ -4,7 +4,12 @@
 
 ```shell
 docker compose up -d # Launch Neo4j
-go run main.go -db-user neo4j -db-pass neo4j -osv -snyk -snyk-orgid <ORG_ID> -snyk-token <TOKEN> -purls purls.txt
+go run main.go \
+  -db-user neo4j -db-pass j4oen \
+  -osv \
+  -ossindex -ossindex-user <USERNAME> -ossindex-token <TOKEN> \
+  -snyk -snyk-orgid <ORG_ID> -snyk-token <TOKEN> \
+  -purls purls.txt
 ```
 
 > **Note**  
