@@ -1,10 +1,10 @@
-package main
+package snyk
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
+	"github.com/nscuro/gotalias/internal/graphdb"
 	"golang.org/x/time/rate"
 	"log"
 	"net/http"
@@ -13,11 +13,14 @@ import (
 	"time"
 )
 
-const snykBaseURL = "https://api.snyk.io"
+const (
+	baseURL = "https://api.snyk.io"
+	source  = "SNYK"
+)
 
 var snykLimiter = rate.NewLimiter(rate.Every(time.Minute/100), 100)
 
-func MirrorSnyk(ns neo4j.SessionWithContext, orgId, token string, purls []string) error {
+func Mirror(db *graphdb.DB, orgId, token string, purls []string) error {
 	for _, purl := range purls {
 		issues, err := getSnykIssues(orgId, token, purl)
 		if err != nil {
@@ -25,7 +28,7 @@ func MirrorSnyk(ns neo4j.SessionWithContext, orgId, token string, purls []string
 		}
 
 		for _, issue := range issues {
-			err = insertIssue(ns, issue)
+			err = insertIssue(db, issue)
 			if err != nil {
 				return err
 			}
@@ -35,16 +38,10 @@ func MirrorSnyk(ns neo4j.SessionWithContext, orgId, token string, purls []string
 	return nil
 }
 
-func insertIssue(ns neo4j.SessionWithContext, issue snykIssue) error {
-	tx, err := ns.BeginTransaction(context.TODO())
+func insertIssue(db *graphdb.DB, issue snykIssue) error {
+	err := db.AddVulnerability(issue.Key)
 	if err != nil {
-		return err
-	}
-
-	// Ensure vulnerability exists
-	_, err = tx.Run(context.TODO(), `MERGE (:Vulnerability {id: $id})`, map[string]any{"id": issue.Key})
-	if err != nil {
-		return err
+		return fmt.Errorf("failed to add vulnerability %s: %w", issue.Key, err)
 	}
 
 	for _, problem := range issue.Problems {
@@ -53,22 +50,22 @@ func insertIssue(ns neo4j.SessionWithContext, issue snykIssue) error {
 			continue
 		}
 
-		// Ensure the aliased vulnerability exists
-		_, err = tx.Run(context.TODO(), `MERGE (:Vulnerability {id: $id})`, map[string]any{"id": problem.ID})
+		err = db.AddVulnerability(problem.ID)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to add vulnerability %s as alias for %s: %w", problem.ID, issue.Key, err)
 		}
 
-		// Create a bidirectional relationship between vulnerability and alias
-		_, err = tx.Run(context.TODO(), `
-MATCH (a:Vulnerability {id:$id}), (b:Vulnerability{id:$alias}) 
-MERGE (a)-[:ALIASES {reportedBy:["SNYK"]}]->(b)-[:ALIASES {reportedBy:["SNYK"]}]->(a)`, map[string]any{"id": issue.Key, "alias": problem.ID})
+		err = db.AddAlias(issue.Key, problem.ID, source)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to add alias relationship %s -> %s: %w", problem.ID, issue.Key, err)
+		}
+		err = db.AddAlias(problem.ID, issue.Key, source)
+		if err != nil {
+			return fmt.Errorf("failed to add alias relationship %s -> %s: %w", issue.Key, problem.ID, err)
 		}
 	}
 
-	return tx.Commit(context.TODO())
+	return nil
 }
 
 func getSnykIssues(orgId, token, purl string) ([]snykIssue, error) {
@@ -80,7 +77,7 @@ func getSnykIssues(orgId, token, purl string) ([]snykIssue, error) {
 	purl = strings.Split(purl, "?")[0]
 	purl = url.QueryEscape(purl)
 
-	reqURL, err := url.JoinPath(snykBaseURL, "rest", "orgs", orgId, "packages", purl, "issues")
+	reqURL, err := url.JoinPath(baseURL, "rest", "orgs", orgId, "packages", purl, "issues")
 	if err != nil {
 		return nil, err
 	}

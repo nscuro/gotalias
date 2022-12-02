@@ -5,6 +5,9 @@ import (
 	"context"
 	"flag"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
+	"github.com/nscuro/gotalias/internal/graphdb"
+	"github.com/nscuro/gotalias/internal/osv"
+	"github.com/nscuro/gotalias/internal/snyk"
 	"log"
 	"os"
 	"strings"
@@ -42,6 +45,8 @@ func main() {
 	})
 	defer session.Close(ctx)
 
+	db := graphdb.New(session)
+
 	purls := make([]string, 0)
 	if purlsFile != "" {
 		log.Printf("reading purls from %s", purlsFile)
@@ -64,7 +69,7 @@ func main() {
 
 	if mirrorOSV {
 		log.Println("mirroring osv")
-		err = MirrorOSV(session)
+		err = osv.Mirror(db)
 		if err != nil {
 			log.Fatalln(err)
 		}
@@ -72,7 +77,7 @@ func main() {
 
 	if mirrorSnyk {
 		log.Printf("mirroring snyk data for %d purls", len(purls))
-		err = MirrorSnyk(session, snykOrgId, snykToken, purls)
+		err = snyk.Mirror(db, snykOrgId, snykToken, purls)
 		if err != nil {
 			log.Fatalln(err)
 		}

@@ -1,4 +1,4 @@
-package main
+package osv
 
 import (
 	"archive/zip"
@@ -7,7 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
+	"github.com/nscuro/gotalias/internal/graphdb"
 	"golang.org/x/vuln/osv"
 	"io"
 	"log"
@@ -16,13 +16,19 @@ import (
 	"strings"
 )
 
-const osvBaseURL = "https://osv-vulnerabilities.storage.googleapis.com"
+const (
+	baseURL = "https://osv-vulnerabilities.storage.googleapis.com"
+	source  = "OSV"
+)
 
-func MirrorOSV(ns neo4j.SessionWithContext) error {
-	ecosystems, err := GetEcosystems()
+func Mirror(db *graphdb.DB) error {
+	ecosystems, err := getEcosystems()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to fetch ecosystem list: %w", err)
 	}
+
+	ctx, cancelCtx := context.WithCancel(context.Background())
+	defer cancelCtx()
 
 	for _, ecosystem := range ecosystems {
 		if strings.Contains(ecosystem, ":") {
@@ -30,14 +36,8 @@ func MirrorOSV(ns neo4j.SessionWithContext) error {
 			continue
 		}
 
-		log.Printf("processing ecosystem %s...", ecosystem)
-		err = InsertEcosystem(ns, ecosystem)
-		if err != nil {
-			return err
-		}
-
-		entryChan, errChan := DownloadEcosystem(ecosystem)
-
+		log.Printf("mirroring ecosystem %s", ecosystem)
+		entryChan, errChan := downloadEcosystem(ctx, ecosystem)
 	loop:
 		for {
 			select {
@@ -46,9 +46,9 @@ func MirrorOSV(ns neo4j.SessionWithContext) error {
 					log.Printf("no more entries for ecosystem %s", ecosystem)
 					break loop
 				}
-				err := InsertEntry(ns, ecosystem, entry)
+				err := insertEntry(db, entry)
 				if err != nil {
-					log.Printf("failed to insert entry %s: %v", entry.ID, err)
+					return fmt.Errorf("failed to insert entry %s: %w", entry.ID, err)
 				}
 			case err := <-errChan:
 				fmt.Printf("got error: %v", err)
@@ -59,57 +59,32 @@ func MirrorOSV(ns neo4j.SessionWithContext) error {
 	return nil
 }
 
-func InsertEcosystem(ns neo4j.SessionWithContext, ecosystem string) error {
-	tx, err := ns.BeginTransaction(context.TODO())
+func insertEntry(db *graphdb.DB, entry osv.Entry) error {
+	err := db.AddVulnerability(entry.ID)
 	if err != nil {
-		return err
-	}
-
-	_, err = tx.Run(context.TODO(), `MERGE (:Ecosystem {name: $name})`, map[string]any{"name": ecosystem})
-	if err != nil {
-		return err
-	}
-
-	return tx.Commit(context.TODO())
-}
-
-func InsertEntry(ns neo4j.SessionWithContext, ecosystem string, entry osv.Entry) error {
-	tx, err := ns.BeginTransaction(context.TODO())
-	if err != nil {
-		return err
-	}
-
-	// Ensure vulnerability exists
-	_, err = tx.Run(context.TODO(), `MERGE (:Vulnerability {id: $id})`, map[string]any{"id": entry.ID})
-	if err != nil {
-		return err
-	}
-
-	_, err = tx.Run(context.TODO(), `MATCH (e:Ecosystem {name: $ecosystem}), (v:Vulnerability {id: $id}) MERGE (e)-[:CONTAINS]->(v)`, map[string]any{"ecosystem": ecosystem, "id": entry.ID})
-	if err != nil {
-		return err
+		return fmt.Errorf("failed to add vulnerability %s: %w", entry.ID, err)
 	}
 
 	for _, alias := range entry.Aliases {
-		// Ensure the aliased vulnerability exists
-		_, err = tx.Run(context.TODO(), `MERGE (:Vulnerability {id: $id})`, map[string]any{"id": alias})
+		err = db.AddVulnerability(alias)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to add vulnerability %s as alias for %s: %w", alias, entry.ID, err)
 		}
 
-		// Create a bidirectional relationship between vulnerability and alias
-		_, err = tx.Run(context.TODO(), `
-MATCH (a:Vulnerability {id:$id}), (b:Vulnerability{id:$alias}) 
-MERGE (a)-[:ALIASES {reportedBy:["OSV"]}]->(b)-[:ALIASES {reportedBy:["OSV"]}]->(a)`, map[string]any{"id": entry.ID, "alias": alias})
+		err = db.AddAlias(entry.ID, alias, source)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to add alias relationship %s -> %s: %w", alias, entry.ID, err)
+		}
+		err = db.AddAlias(alias, entry.ID, source)
+		if err != nil {
+			return fmt.Errorf("failed to add alias relationship %s -> %s: %w", entry.ID, alias, err)
 		}
 	}
 
-	return tx.Commit(context.TODO())
+	return nil
 }
 
-func DownloadEcosystem(ecosystem string) (<-chan osv.Entry, <-chan error) {
+func downloadEcosystem(ctx context.Context, ecosystem string) (<-chan osv.Entry, <-chan error) {
 	entryChan := make(chan osv.Entry, 1)
 	errChan := make(chan error, 1)
 
@@ -119,7 +94,7 @@ func DownloadEcosystem(ecosystem string) (<-chan osv.Entry, <-chan error) {
 			close(errChan)
 		}()
 
-		fileURL, err := url.JoinPath(osvBaseURL, ecosystem, "all.zip")
+		fileURL, err := url.JoinPath(baseURL, ecosystem, "all.zip")
 		if err != nil {
 			errChan <- err
 			return
@@ -151,6 +126,13 @@ func DownloadEcosystem(ecosystem string) (<-chan osv.Entry, <-chan error) {
 		}
 
 		for _, zipFile := range zipReader.File {
+			select {
+			case <-ctx.Done():
+				log.Println(ctx.Err())
+				return
+			default:
+			}
+
 			file, err := zipFile.Open()
 			if err != nil {
 				errChan <- err
@@ -173,8 +155,8 @@ func DownloadEcosystem(ecosystem string) (<-chan osv.Entry, <-chan error) {
 	return entryChan, nil
 }
 
-func GetEcosystems() ([]string, error) {
-	ecosystemsURL, err := url.JoinPath(osvBaseURL, "ecosystems.txt")
+func getEcosystems() ([]string, error) {
+	ecosystemsURL, err := url.JoinPath(baseURL, "ecosystems.txt")
 	if err != nil {
 		return nil, err
 	}
