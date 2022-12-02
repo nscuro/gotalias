@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"context"
 	"flag"
-	"log"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 
 	"github.com/nscuro/gotalias/internal/graphdb"
 	"github.com/nscuro/gotalias/internal/ossindex"
@@ -41,28 +43,31 @@ func main() {
 	flag.StringVar(&purlsFile, "purls", "", "Path to PURLs file")
 	flag.Parse()
 
-	ctx := context.TODO()
+	logger := log.Output(zerolog.ConsoleWriter{
+		Out: os.Stderr,
+	})
 
+	neoCtx := context.TODO()
 	driver, err := neo4j.NewDriverWithContext("neo4j://localhost:7687", neo4j.BasicAuth(dbUser, dbPass, ""))
 	if err != nil {
-		log.Fatalf("failed to initialize driver: %v", err)
+		logger.Fatal().Err(err).Msg("failed to initialize driver")
 	}
-	defer driver.Close(ctx)
+	defer driver.Close(neoCtx)
 
-	session := driver.NewSession(ctx, neo4j.SessionConfig{
+	session := driver.NewSession(neoCtx, neo4j.SessionConfig{
 		AccessMode: neo4j.AccessModeWrite,
 	})
-	defer session.Close(ctx)
+	defer session.Close(neoCtx)
 
 	db := graphdb.New(session)
 
 	purls := make([]string, 0)
 	if purlsFile != "" {
-		log.Printf("reading purls from %s", purlsFile)
+		logger.Info().Msgf("reading purls from %s", purlsFile)
 
 		pf, err := os.Open(purlsFile)
 		if err != nil {
-			log.Fatalf("failed to open purls file: %v", err)
+			logger.Fatal().Err(err).Msg("failed to open purls file")
 		}
 
 		scanner := bufio.NewScanner(pf)
@@ -76,27 +81,43 @@ func main() {
 		pf.Close()
 	}
 
+	wg := sync.WaitGroup{}
+
 	if mirrorOSV {
-		log.Println("mirroring osv")
-		err = osv.Mirror(db)
-		if err != nil {
-			log.Fatalf("failed to mirror osv: %v", err)
-		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			logger.Info().Msg("mirroring osv")
+			err = osv.Mirror(logger, db)
+			if err != nil {
+				logger.Fatal().Err(err).Msg("failed to mirror osv")
+			}
+		}()
 	}
 
 	if mirrorOSSIndex {
-		log.Printf("mirroring oss index data for %d purls", len(purls))
-		err = ossindex.Mirror(db, ossIndexUser, ossIndexToken, purls)
-		if err != nil {
-			log.Fatalf("failed to mirror ossindex: %v", err)
-		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			logger.Info().Msgf("mirroring oss index data for %d purls", len(purls))
+			err = ossindex.Mirror(logger, db, ossIndexUser, ossIndexToken, purls)
+			if err != nil {
+				logger.Fatal().Err(err).Msg("failed to mirror ossindex")
+			}
+		}()
 	}
 
 	if mirrorSnyk {
-		log.Printf("mirroring snyk data for %d purls", len(purls))
-		err = snyk.Mirror(db, snykOrgId, snykToken, purls)
-		if err != nil {
-			log.Fatalf("failed to mirror snyk: %v", err)
-		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			logger.Info().Msgf("mirroring snyk data for %d purls", len(purls))
+			err = snyk.Mirror(logger, db, snykOrgId, snykToken, purls)
+			if err != nil {
+				logger.Fatal().Err(err).Msg("failed to mirror snyk")
+			}
+		}()
 	}
+
+	wg.Wait()
 }

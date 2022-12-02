@@ -7,13 +7,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/nscuro/gotalias/internal/graphdb"
-	"golang.org/x/vuln/osv"
 	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/rs/zerolog"
+	"golang.org/x/vuln/osv"
+
+	"github.com/nscuro/gotalias/internal/graphdb"
 )
 
 const (
@@ -21,7 +24,9 @@ const (
 	source  = "OSV"
 )
 
-func Mirror(db *graphdb.DB) error {
+func Mirror(logger zerolog.Logger, db *graphdb.DB) error {
+	logger = logger.With().Str("source", source).Logger()
+
 	ecosystems, err := getEcosystems()
 	if err != nil {
 		return fmt.Errorf("failed to fetch ecosystem list: %w", err)
@@ -32,18 +37,18 @@ func Mirror(db *graphdb.DB) error {
 
 	for _, ecosystem := range ecosystems {
 		if strings.Contains(ecosystem, ":") {
-			log.Printf("skipping sub-ecosystem %s", ecosystem)
+			logger.Info().Str("ecosystem", ecosystem).Msg("skipping sub-ecosystem")
 			continue
 		}
 
-		log.Printf("mirroring ecosystem %s", ecosystem)
+		logger.Info().Str("ecosystem", ecosystem).Msg("mirroring ecosystem")
 		entryChan, errChan := downloadEcosystem(ctx, ecosystem)
 	loop:
 		for {
 			select {
 			case entry, open := <-entryChan:
 				if !open {
-					log.Printf("no more entries for ecosystem %s", ecosystem)
+					logger.Info().Str("ecosystem", ecosystem).Msg("no more entries")
 					break loop
 				}
 				err := insertEntry(db, entry)
@@ -51,7 +56,7 @@ func Mirror(db *graphdb.DB) error {
 					return fmt.Errorf("failed to insert entry %s: %w", entry.ID, err)
 				}
 			case err := <-errChan:
-				fmt.Printf("got error: %v", err)
+				logger.Warn().Err(err).Str("ecosystem", ecosystem).Msg("encountered error while downloading ecosystem")
 			}
 		}
 	}

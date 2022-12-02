@@ -4,8 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
+
+	"github.com/rs/zerolog"
 
 	"github.com/nscuro/gotalias/internal/graphdb"
 )
@@ -14,12 +15,14 @@ const (
 	source = "OSSINDEX"
 )
 
-func Mirror(db *graphdb.DB, username, token string, purls []string) error {
+func Mirror(logger zerolog.Logger, db *graphdb.DB, username, token string, purls []string) error {
+	logger = logger.With().Str("source", source).Logger()
+
 	chunks := chunkCoordinates(purls)
-	log.Printf("divided %d purls into %d chunks", len(purls), len(chunks))
+	logger.Info().Msgf("divided %d purls into %d chunks", len(purls), len(chunks))
 
 	for i, chunk := range chunkCoordinates(purls) {
-		log.Printf("fetching reports for chunk %d/%d", i+1, len(chunks))
+		logger.Info().Msgf("fetching reports for chunk %d/%d", i+1, len(chunks))
 		reports, err := getComponentReports(username, token, chunk)
 		if err != nil {
 			return fmt.Errorf("failed to get component reports: %w", err)
