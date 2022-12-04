@@ -50,23 +50,34 @@ func insertIssue(logger zerolog.Logger, db *graphdb.DB, issue snykIssue) error {
 	}
 
 	for _, problem := range issue.Problems {
-		if problem.Source != "GHSA" && problem.Source != "CVE" {
-			logger.Info().Msgf("skipping problem source %s", problem.Source)
-			continue
+		if problem.Source == "CWE" {
+			err = db.AddCWE(issue.Key, problem.ID, source)
+			if err != nil {
+				return fmt.Errorf("failed to add cwe for vulnerability %s: %w", issue.Key, err)
+			}
 		}
 
-		err = db.AddVulnerability(problem.ID)
-		if err != nil {
-			return fmt.Errorf("failed to add vulnerability %s as alias for %s: %w", problem.ID, issue.Key, err)
-		}
+		if problem.Source == "GHSA" || problem.Source == "CVE" {
+			err = db.AddVulnerability(problem.ID)
+			if err != nil {
+				return fmt.Errorf("failed to add vulnerability %s as alias for %s: %w", problem.ID, issue.Key, err)
+			}
 
-		err = db.AddAlias(issue.Key, problem.ID, source)
-		if err != nil {
-			return fmt.Errorf("failed to add alias relationship %s -> %s: %w", problem.ID, issue.Key, err)
+			err = db.AddAlias(issue.Key, problem.ID, source)
+			if err != nil {
+				return fmt.Errorf("failed to add alias relationship %s -> %s: %w", problem.ID, issue.Key, err)
+			}
+			err = db.AddAlias(problem.ID, issue.Key, source)
+			if err != nil {
+				return fmt.Errorf("failed to add alias relationship %s -> %s: %w", issue.Key, problem.ID, err)
+			}
 		}
-		err = db.AddAlias(problem.ID, issue.Key, source)
+	}
+
+	for _, severity := range issue.Severities {
+		err = db.AddCVSS(issue.Key, severity.Score, severity.Vector, fmt.Sprintf("%s/%s", source, severity.Source))
 		if err != nil {
-			return fmt.Errorf("failed to add alias relationship %s -> %s: %w", issue.Key, problem.ID, err)
+			return fmt.Errorf("failed to add cvss details for vulnerability %s: %w", issue.Key, err)
 		}
 	}
 
@@ -133,11 +144,21 @@ type snykResponseData struct {
 }
 
 type snykIssue struct {
-	Key      string        `json:"key"`
-	Problems []snykProblem `json:"problems"`
+	Key        string         `json:"key"`
+	CreatedAt  string         `json:"created_at"`
+	UpdatedAt  string         `json:"updated_at"`
+	Problems   []snykProblem  `json:"problems"`
+	Severities []snykSeverity `json:"severities"`
 }
 
 type snykProblem struct {
 	ID     string `json:"id"`
 	Source string `json:"source"`
+}
+
+type snykSeverity struct {
+	Level  string  `json:"level"`
+	Score  float64 `json:"score"`
+	Source string  `json:"source"`
+	Vector string  `json:"vector"`
 }

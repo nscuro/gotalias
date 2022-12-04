@@ -54,13 +54,6 @@ func main() {
 	}
 	defer driver.Close(neoCtx)
 
-	session := driver.NewSession(neoCtx, neo4j.SessionConfig{
-		AccessMode: neo4j.AccessModeWrite,
-	})
-	defer session.Close(neoCtx)
-
-	db := graphdb.New(session)
-
 	purls := make([]string, 0)
 	if purlsFile != "" {
 		logger.Info().Msgf("reading purls from %s", purlsFile)
@@ -84,11 +77,16 @@ func main() {
 	wg := sync.WaitGroup{}
 
 	if mirrorOSV {
+		session := driver.NewSession(neoCtx, neo4j.SessionConfig{
+			AccessMode: neo4j.AccessModeWrite,
+		})
+		defer session.Close(neoCtx)
+
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			logger.Info().Msg("mirroring osv")
-			err = osv.Mirror(logger, db)
+			err = osv.Mirror(logger, graphdb.New(session))
 			if err != nil {
 				logger.Fatal().Err(err).Msg("failed to mirror osv")
 			}
@@ -96,11 +94,16 @@ func main() {
 	}
 
 	if mirrorOSSIndex {
+		session := driver.NewSession(neoCtx, neo4j.SessionConfig{
+			AccessMode: neo4j.AccessModeWrite,
+		})
+		defer session.Close(neoCtx)
+
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			logger.Info().Msgf("mirroring oss index data for %d purls", len(purls))
-			err = ossindex.Mirror(logger, db, ossIndexUser, ossIndexToken, purls)
+			err = ossindex.Mirror(logger, graphdb.New(session), ossIndexUser, ossIndexToken, purls)
 			if err != nil {
 				logger.Fatal().Err(err).Msg("failed to mirror ossindex")
 			}
@@ -108,11 +111,16 @@ func main() {
 	}
 
 	if mirrorSnyk {
+		session := driver.NewSession(neoCtx, neo4j.SessionConfig{
+			AccessMode: neo4j.AccessModeWrite,
+		})
+		defer session.Close(neoCtx)
+
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			logger.Info().Msgf("mirroring snyk data for %d purls", len(purls))
-			err = snyk.Mirror(logger, db, snykOrgId, snykToken, purls)
+			err = snyk.Mirror(logger, graphdb.New(session), snykOrgId, snykToken, purls)
 			if err != nil {
 				logger.Fatal().Err(err).Msg("failed to mirror snyk")
 			}

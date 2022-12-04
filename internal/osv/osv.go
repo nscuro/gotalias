@@ -13,8 +13,9 @@ import (
 	"net/url"
 	"strings"
 
+	cvssv2 "github.com/goark/go-cvss/v2"
+	cvssv3 "github.com/goark/go-cvss/v3/metric"
 	"github.com/rs/zerolog"
-	"golang.org/x/vuln/osv"
 
 	"github.com/nscuro/gotalias/internal/graphdb"
 )
@@ -36,7 +37,7 @@ func Mirror(logger zerolog.Logger, db *graphdb.DB) error {
 	defer cancelCtx()
 
 	for _, ecosystem := range ecosystems {
-		if strings.Contains(ecosystem, ":") {
+		if strings.Contains(ecosystem, ":") || strings.HasPrefix(ecosystem, "Debian") {
 			logger.Info().Str("ecosystem", ecosystem).Msg("skipping sub-ecosystem")
 			continue
 		}
@@ -51,7 +52,7 @@ func Mirror(logger zerolog.Logger, db *graphdb.DB) error {
 					logger.Info().Str("ecosystem", ecosystem).Msg("no more entries")
 					break loop
 				}
-				err := insertEntry(db, entry)
+				err := insertEntry(logger, db, entry)
 				if err != nil {
 					return fmt.Errorf("failed to insert entry %s: %w", entry.ID, err)
 				}
@@ -64,7 +65,7 @@ func Mirror(logger zerolog.Logger, db *graphdb.DB) error {
 	return nil
 }
 
-func insertEntry(db *graphdb.DB, entry osv.Entry) error {
+func insertEntry(logger zerolog.Logger, db *graphdb.DB, entry osvEntry) error {
 	err := db.AddVulnerability(entry.ID)
 	if err != nil {
 		return fmt.Errorf("failed to add vulnerability %s: %w", entry.ID, err)
@@ -86,11 +87,55 @@ func insertEntry(db *graphdb.DB, entry osv.Entry) error {
 		}
 	}
 
+	for _, severity := range entry.Severity {
+		var score float64
+		if severity.Type == "CVSS_V2" {
+			c := cvssv2.New()
+			err = c.ImportBaseVector(severity.Score)
+			if err != nil {
+				logger.Warn().Err(err).Str("vector", severity.Score).Msg("failed to calculate cvssv2 score")
+				continue
+			}
+			score = c.Base.Score()
+		} else if severity.Type == "CVSS_V3" {
+			base, err := cvssv3.NewBase().Decode(severity.Score)
+			if err != nil {
+				logger.Warn().Err(err).Str("vector", severity.Score).Msg("failed to calculate cvssv3 score")
+				continue
+			}
+			score = base.Score()
+		}
+
+		err = db.AddCVSS(entry.ID, score, severity.Score, source)
+		if err != nil {
+			return fmt.Errorf("failed to add cvss details to vulnerability %s: %w", entry.ID, err)
+		}
+	}
+
+	for _, cwe := range entry.DatabaseSpecific.CWEIDs {
+		err = db.AddCWE(entry.ID, cwe, source)
+		if err != nil {
+			return fmt.Errorf("failed to add cwe for vulnerability %s: %w", entry.ID, err)
+		}
+	}
+
 	return nil
 }
 
-func downloadEcosystem(ctx context.Context, ecosystem string) (<-chan osv.Entry, <-chan error) {
-	entryChan := make(chan osv.Entry, 1)
+type osvEntry struct {
+	ID       string   `json:"id"`
+	Aliases  []string `json:"aliases,omitempty"`
+	Severity []struct {
+		Type  string `json:"type"`
+		Score string `json:"score"`
+	} `json:"severity"`
+	DatabaseSpecific struct {
+		CWEIDs []string `json:"cwe_ids"`
+	} `json:"database_specific"`
+}
+
+func downloadEcosystem(ctx context.Context, ecosystem string) (<-chan osvEntry, <-chan error) {
+	entryChan := make(chan osvEntry, 1)
 	errChan := make(chan error, 1)
 
 	go func() {
@@ -144,7 +189,7 @@ func downloadEcosystem(ctx context.Context, ecosystem string) (<-chan osv.Entry,
 				continue
 			}
 
-			var entry osv.Entry
+			var entry osvEntry
 			err = json.NewDecoder(file).Decode(&entry)
 			if err != nil {
 				errChan <- err

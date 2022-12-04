@@ -47,6 +47,20 @@ func insertVulnerability(db *graphdb.DB, vuln vulnerability) error {
 		return fmt.Errorf("failed to add vulnerability %s: %w", vuln.ID, err)
 	}
 
+	if vuln.CWE != "" {
+		err = db.AddCWE(vuln.ID, vuln.CWE, source)
+		if err != nil {
+			return fmt.Errorf("failed to add cwe for vulnerability %s: %w", vuln.ID, err)
+		}
+	}
+
+	if vuln.CVSSScore != 0 || vuln.CVSSVector != "" {
+		err = db.AddCVSS(vuln.ID, vuln.CVSSScore, vuln.CVSSVector, source)
+		if err != nil {
+			return fmt.Errorf("failed to add cvss details for vulnerability %s: %w", vuln.ID, err)
+		}
+	}
+
 	if vuln.CVE != "" && vuln.ID != vuln.CVE {
 		err = db.AddVulnerability(vuln.CVE)
 		if err != nil {
@@ -75,8 +89,11 @@ type componentReportsRequest struct {
 }
 
 type vulnerability struct {
-	ID  string `json:"id"`
-	CVE string `json:"cve"`
+	ID         string  `json:"id"`
+	CVE        string  `json:"cve"`
+	CWE        string  `json:"cwe"`
+	CVSSScore  float64 `json:"cvssScore"`
+	CVSSVector string  `json:"cvssVector"`
 }
 
 func getComponentReports(username, token string, coordinates []string) ([]componentReport, error) {
