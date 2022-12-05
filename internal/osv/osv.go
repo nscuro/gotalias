@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -43,7 +42,7 @@ func Mirror(logger zerolog.Logger, db *graphdb.DB) error {
 		}
 
 		logger.Info().Str("ecosystem", ecosystem).Msg("mirroring ecosystem")
-		entryChan, errChan := downloadEcosystem(ctx, ecosystem)
+		entryChan, errChan := downloadEcosystem(ctx, logger, ecosystem)
 	loop:
 		for {
 			select {
@@ -134,7 +133,7 @@ type osvEntry struct {
 	} `json:"database_specific"`
 }
 
-func downloadEcosystem(ctx context.Context, ecosystem string) (<-chan osvEntry, <-chan error) {
+func downloadEcosystem(ctx context.Context, logger zerolog.Logger, ecosystem string) (<-chan osvEntry, <-chan error) {
 	entryChan := make(chan osvEntry, 1)
 	errChan := make(chan error, 1)
 
@@ -178,7 +177,7 @@ func downloadEcosystem(ctx context.Context, ecosystem string) (<-chan osvEntry, 
 		for _, zipFile := range zipReader.File {
 			select {
 			case <-ctx.Done():
-				log.Println(ctx.Err())
+				logger.Warn().Err(err).Msg("aborted")
 				return
 			default:
 			}

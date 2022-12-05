@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"flag"
+	"github.com/nscuro/gotalias/internal/github"
 	"os"
 	"strings"
 	"sync"
@@ -23,6 +24,8 @@ func main() {
 		dbUser         string
 		dbPass         string
 		mirrorOSV      bool
+		mirrorGitHub   bool
+		githubToken    string
 		mirrorOSSIndex bool
 		ossIndexUser   string
 		ossIndexToken  string
@@ -34,6 +37,8 @@ func main() {
 	flag.StringVar(&dbUser, "db-user", "neo4j", "Database username")
 	flag.StringVar(&dbPass, "db-pass", "", "Database password")
 	flag.BoolVar(&mirrorOSV, "osv", false, "Mirror OSV")
+	flag.BoolVar(&mirrorGitHub, "github", false, "Mirror GitHub")
+	flag.StringVar(&githubToken, "github-token", "", "GitHub token")
 	flag.BoolVar(&mirrorOSSIndex, "ossindex", false, "Mirror OSS Index")
 	flag.StringVar(&ossIndexUser, "ossindex-user", "", "OSS Index username")
 	flag.StringVar(&ossIndexToken, "ossindex-token", "", "OSS Index token")
@@ -89,6 +94,23 @@ func main() {
 			err = osv.Mirror(logger, graphdb.New(session))
 			if err != nil {
 				logger.Fatal().Err(err).Msg("failed to mirror osv")
+			}
+		}()
+	}
+
+	if mirrorGitHub {
+		session := driver.NewSession(neoCtx, neo4j.SessionConfig{
+			AccessMode: neo4j.AccessModeWrite,
+		})
+		defer session.Close(neoCtx)
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			logger.Info().Msg("mirroring github")
+			err = github.Mirror(logger, graphdb.New(session), githubToken)
+			if err != nil {
+				logger.Fatal().Err(err).Msg("failed to mirror github")
 			}
 		}()
 	}

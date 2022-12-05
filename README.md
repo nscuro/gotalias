@@ -44,6 +44,15 @@ WITH v, COUNT(r) AS rc
 WHERE rc > 1
 RETURN *
 ORDER BY rc DESC
+
+// Find all vulnerabilities for which more than one alias was reported by GitHub
+MATCH (v:Vulnerability)-[r:ALIASES]->(:Vulnerability)
+WHERE ANY(item IN r.reportedBy WHERE item = "GITHUB")
+WITH v, COUNT(r) AS rc
+WHERE rc > 1
+RETURN *
+ORDER BY rc
+LIMIT 100
 ```
 
 ### Data Samples
