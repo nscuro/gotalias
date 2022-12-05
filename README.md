@@ -31,6 +31,14 @@ go run main.go \
 MATCH (:Vulnerability {id: "GHSA-5mcr-gq6c-3hq2"})
 RETURN *
 
+// Find the top 100 most aliased non-Debian vulnerabilities
+MATCH (vuln:Vulnerability)<-[r:ALIASES]-(:Vulnerability)
+WHERE NOT vuln.id STARTS WITH "DLA-"
+WITH vuln, COUNT(r) as aliasCount
+RETURN *
+ORDER BY aliasCount DESC
+LIMIT 100
+
 // Find all Snyk vulnerabilities and their aliases
 MATCH (v:Vulnerability)-[:ALIASES]->(:Vulnerability)
 WHERE v.id = STARTS WITH "SNYK-"
