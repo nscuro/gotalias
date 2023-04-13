@@ -12,7 +12,7 @@ import (
 	"net/url"
 	"strings"
 
-	cvssv2 "github.com/goark/go-cvss/v2"
+	cvssv2 "github.com/goark/go-cvss/v2/metric"
 	cvssv3 "github.com/goark/go-cvss/v3/metric"
 	"github.com/rs/zerolog"
 
@@ -89,13 +89,12 @@ func insertEntry(logger zerolog.Logger, db *graphdb.DB, entry osvEntry) error {
 	for _, severity := range entry.Severity {
 		var score float64
 		if severity.Type == "CVSS_V2" {
-			c := cvssv2.New()
-			err = c.ImportBaseVector(severity.Score)
+			base, err := cvssv2.NewBase().Decode(severity.Score)
 			if err != nil {
 				logger.Warn().Err(err).Str("vector", severity.Score).Msg("failed to calculate cvssv2 score")
 				continue
 			}
-			score = c.Base.Score()
+			score = base.Score()
 		} else if severity.Type == "CVSS_V3" {
 			base, err := cvssv3.NewBase().Decode(severity.Score)
 			if err != nil {

@@ -4,10 +4,11 @@ import (
 	"bufio"
 	"context"
 	"flag"
-	"github.com/nscuro/gotalias/internal/github"
 	"os"
 	"strings"
 	"sync"
+
+	"github.com/nscuro/gotalias/internal/github"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/rs/zerolog"
@@ -53,7 +54,7 @@ func main() {
 	})
 
 	neoCtx := context.TODO()
-	driver, err := neo4j.NewDriverWithContext("neo4j://localhost:7687", neo4j.BasicAuth(dbUser, dbPass, ""))
+	driver, err := neo4j.NewDriverWithContext("neo4j://localhost:7687", neo4j.NoAuth())
 	if err != nil {
 		logger.Fatal().Err(err).Msg("failed to initialize driver")
 	}
