@@ -22,8 +22,6 @@ import (
 
 func main() {
 	var (
-		dbUser         string
-		dbPass         string
 		mirrorOSV      bool
 		mirrorGitHub   bool
 		githubToken    string
@@ -35,8 +33,6 @@ func main() {
 		snykToken      string
 		purlsFile      string
 	)
-	flag.StringVar(&dbUser, "db-user", "neo4j", "Database username")
-	flag.StringVar(&dbPass, "db-pass", "", "Database password")
 	flag.BoolVar(&mirrorOSV, "osv", false, "Mirror OSV")
 	flag.BoolVar(&mirrorGitHub, "github", false, "Mirror GitHub")
 	flag.StringVar(&githubToken, "github-token", "", "GitHub token")
