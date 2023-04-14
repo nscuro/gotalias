@@ -22,26 +22,20 @@ import (
 
 func main() {
 	var (
-		mirrorOSV      bool
-		mirrorGitHub   bool
-		githubToken    string
-		mirrorOSSIndex bool
-		ossIndexUser   string
-		ossIndexToken  string
-		mirrorSnyk     bool
-		snykOrgId      string
-		snykToken      string
-		purlsFile      string
+		mirrorOSV     bool
+		githubToken   string
+		ossIndexUser  string
+		ossIndexToken string
+		snykOrgId     string
+		snykTokens    string
+		purlsFile     string
 	)
 	flag.BoolVar(&mirrorOSV, "osv", false, "Mirror OSV")
-	flag.BoolVar(&mirrorGitHub, "github", false, "Mirror GitHub")
 	flag.StringVar(&githubToken, "github-token", "", "GitHub token")
-	flag.BoolVar(&mirrorOSSIndex, "ossindex", false, "Mirror OSS Index")
 	flag.StringVar(&ossIndexUser, "ossindex-user", "", "OSS Index username")
 	flag.StringVar(&ossIndexToken, "ossindex-token", "", "OSS Index token")
-	flag.BoolVar(&mirrorSnyk, "snyk", false, "Mirror snyk")
 	flag.StringVar(&snykOrgId, "snyk-orgid", "", "Snyk org ID")
-	flag.StringVar(&snykToken, "snyk-token", "", "Snyk token")
+	flag.StringVar(&snykTokens, "snyk-tokens", "", "Snyk token")
 	flag.StringVar(&purlsFile, "purls", "", "Path to PURLs file")
 	flag.Parse()
 
@@ -95,7 +89,7 @@ func main() {
 		}()
 	}
 
-	if mirrorGitHub {
+	if githubToken != "" {
 		session := driver.NewSession(neoCtx, neo4j.SessionConfig{
 			AccessMode: neo4j.AccessModeWrite,
 		})
@@ -112,7 +106,7 @@ func main() {
 		}()
 	}
 
-	if mirrorOSSIndex {
+	if ossIndexUser != "" && ossIndexToken != "" {
 		session := driver.NewSession(neoCtx, neo4j.SessionConfig{
 			AccessMode: neo4j.AccessModeWrite,
 		})
@@ -129,7 +123,7 @@ func main() {
 		}()
 	}
 
-	if mirrorSnyk {
+	if snykOrgId != "" && snykTokens != "" {
 		session := driver.NewSession(neoCtx, neo4j.SessionConfig{
 			AccessMode: neo4j.AccessModeWrite,
 		})
@@ -139,7 +133,7 @@ func main() {
 		go func() {
 			defer wg.Done()
 			logger.Info().Msgf("mirroring snyk data for %d purls", len(purls))
-			err = snyk.Mirror(logger, graphdb.New(session), snykOrgId, snykToken, purls)
+			err = snyk.Mirror(logger, graphdb.New(session), snykOrgId, strings.Split(snykTokens, ","), purls)
 			if err != nil {
 				logger.Fatal().Err(err).Msg("failed to mirror snyk")
 			}

@@ -1,16 +1,14 @@
 package snyk
 
 import (
-	"context"
+	"container/ring"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/rs/zerolog"
-	"golang.org/x/time/rate"
 
 	"github.com/nscuro/gotalias/internal/graphdb"
 )
@@ -20,13 +18,22 @@ const (
 	source  = "SNYK"
 )
 
-var limiter = rate.NewLimiter(rate.Every(time.Minute/100), 100)
-
-func Mirror(logger zerolog.Logger, db *graphdb.DB, orgId, token string, purls []string) error {
+func Mirror(logger zerolog.Logger, db *graphdb.DB, orgId string, tokens []string, purls []string) error {
 	logger = logger.With().Str("source", source).Logger()
 
+	tokenRing := ring.New(len(tokens))
+	for i := 0; i < tokenRing.Len(); i++ {
+		tokenRing.Value = tokens[i]
+		tokenRing = tokenRing.Next()
+	}
+
 	for _, purl := range purls {
-		issues, err := getSnykIssues(orgId, token, purl)
+		if !isSupported(purl) {
+			logger.Warn().Str("purl", purl).Msg("skipping unsupported purl")
+			continue
+		}
+
+		issues, err := getSnykIssues(orgId, tokenRing.Next().Value.(string), purl)
 		if err != nil {
 			logger.Warn().Str("purl", purl).Err(err).Msg("failed get issues")
 			continue
@@ -85,11 +92,6 @@ func insertIssue(logger zerolog.Logger, db *graphdb.DB, issue snykIssue) error {
 }
 
 func getSnykIssues(orgId, token, purl string) ([]snykIssue, error) {
-	err := limiter.Wait(context.TODO())
-	if err != nil {
-		return nil, fmt.Errorf("failed to wait for rate limiter: %w", err)
-	}
-
 	purl = strings.Split(purl, "?")[0]
 	purl = url.QueryEscape(purl)
 
@@ -133,6 +135,29 @@ func getSnykIssues(orgId, token, purl string) ([]snykIssue, error) {
 	}
 
 	return issues, nil
+}
+
+var supportedPURLTypes = []string{
+	"cargo",
+	"cocoapods",
+	"composer",
+	"gem",
+	"generic",
+	"hex",
+	"maven",
+	"npm",
+	"nuget",
+	"pypi",
+}
+
+func isSupported(purl string) bool {
+	for _, purlType := range supportedPURLTypes {
+		if strings.HasPrefix(strings.ToLower(purl), fmt.Sprintf("pkg:%s", purlType)) {
+			return true
+		}
+	}
+
+	return false
 }
 
 type snykResponse struct {

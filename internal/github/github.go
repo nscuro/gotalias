@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"fmt"
+
 	"github.com/nscuro/gotalias/internal/graphdb"
 	"github.com/rs/zerolog"
 	"github.com/shurcooL/githubv4"
@@ -12,6 +13,8 @@ import (
 const source = "GITHUB"
 
 func Mirror(logger zerolog.Logger, db *graphdb.DB, token string) error {
+	logger = logger.With().Str("source", source).Logger()
+
 	tokenSrc := oauth2.StaticTokenSource(&oauth2.Token{
 		AccessToken: token,
 	})
