@@ -1,14 +1,17 @@
 # Got Alias?
 
+
+
 ## Usage
 
 ```shell
 docker compose up -d # Launch Neo4j
+
 go run main.go \
-  -db-user neo4j -db-pass j4oen \
+  -github-token <GITHUB_PAT> \
   -osv \
-  -ossindex -ossindex-user <USERNAME> -ossindex-token <TOKEN> \
-  -snyk -snyk-orgid <ORG_ID> -snyk-token <TOKEN> \
+  -ossindex-user <USERNAME> -ossindex-token <TOKEN> \
+  -snyk-orgid <ORG_ID> -snyk-tokens <TOKEN1>,<TOKEN2>,<TOKENX> \
   -purls purls.txt
 ```
 
@@ -20,9 +23,6 @@ go run main.go \
 > for f in ./**/*.json; do jq -r '.components[].purl' $f >> purls.txt; done
 > sort -u purls.txt > purls_unique.txt
 > ```
-
-> **Note**  
-> Snyk API requests are rate limited, scanning many PURLs may take a long time.
 
 ### Useful Cypher Queries
 
@@ -81,11 +81,20 @@ OSV thus reports all those CVEs as aliases for `GHSA-qcvw-h34v-c7r9`.
 ![Aliases of GHSA-qcvw-h34v-c7r9](.github/images/GHSA-qcvw-h34v-c7r9.png)
 
 Because `GHSA-qcvw-h34v-c7r9` aliases `CVE-2021-43299`, does it mean that it aliases the other 4 CVEs, too?
+And does it imply that `CVE-2021-43299` and `CVE-2021-43303` are also identical?
 *Technically*, the other CVEs describe different things than `CVE-2021-43299`.
 
 #### [GO-2022-0586](https://pkg.go.dev/vuln/GO-2022-0586)
 
+The `aliases` field[^1] in OSV is misused[^2] by some vulnerability databases. Instead of populating this field with
+identifiers of vulnerabilities that are truly *identical*, it is populated with *related*[^3] vulnerabilities.
+
+`GO-2022-0586` is an *advisory* rather than a vulnerability, as it represents an aggregate of multiple vulnerabilities.
+
 ![Aliases of GO-2022-0586](.github/images/GO-2022-0586.png)
+
+While there are four pairs of CVEs and GHSAs that indeed alias each other, none of the CVEs or GHSAs actually
+alias `GO-2022-0586`; They are simply not the same. It also can not be assumed that any of the GHSAs alias *each other*. The same is true for the CVEs.
 
 #### [CVE-2021-21290](https://nvd.nist.gov/vuln/detail/CVE-2021-21290)
 
@@ -95,4 +104,11 @@ for each affected `netty` module. The vulnerabilities differ only in their *How 
 
 ![Aliases of CVE-2021-21290](.github/images/CVE-2021-21290.png)
 
-In this case, all vulnerabilities in the graph are indeed aliasing each other.
+> **Note**  
+> Snyk explicitly does *not* state that any of the vulnerabilities it reports in the `problems` field of
+> its PURL API[^4] are aliases. It just so happens that oftentimes they are. But there's no guarantee.
+
+[^1]: https://ossf.github.io/osv-schema/#aliases-field
+[^2]: https://github.com/google/osv.dev/issues/888
+[^3]: https://ossf.github.io/osv-schema/#related-field
+[^4]: https://apidocs.snyk.io/?version=2023-03-29#get-/orgs/-org_id-/packages/-purl-/issues

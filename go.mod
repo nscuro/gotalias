@@ -8,7 +8,6 @@ require (
 	github.com/rs/zerolog v1.29.0
 	github.com/shurcooL/githubv4 v0.0.0-20230305132112-efb623903184
 	golang.org/x/oauth2 v0.7.0
-	golang.org/x/time v0.3.0
 )
 
 require (
